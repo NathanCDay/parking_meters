@@ -1,0 +1,168 @@
+---
+title: "Parking Meters"
+author: "Nate Day"
+date: "2/25/2018"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE, warning = F, message = F}
+knitr::opts_chunk$set(echo = FALSE, comment = "")
+library(geojsonio)
+library(spdep)
+library(leaflet)
+library(lubridate)
+library(viridis)
+library(ggsci)
+library(magrittr)
+library(tidyverse)
+```
+
+## Background
+
+
+![](img/cool_park.gif)
+
+- 105 metered spaces around the Downtown mall
+- Started September 5, 2017
+- City council cancels pilot on January 2, 2018 (planned to run until March 5th)
+- \$51K in revenue (meters cost \$50K)
+
+
+## More info
+
+- Goals
+    - Improve access to short term parking spaces
+    - Get long-term parkers to use the decks
+    - Use revenue for mall improvement projects
+    
+- Concerns
+    - Businnesses worried about meters decreasing patron traffic
+    - Also about employee parking
+
+## The meters
+
+```{r read_in, cache = T}
+dat <- geojson_read("https://opendata.arcgis.com/datasets/d68e620e74e74ec1bd0184971e82ffaa_15.geojson",
+                    parse = TRUE)
+
+dat %<>% .[["features"]] %>% .[[2]]
+
+names(dat) %<>% tolower()
+
+# * Locations ----
+locs <- distinct(dat, meter_lat, meter_long) # 41 of them
+
+leaflet(locs) %>%
+    addTiles() %>%
+    addMarkers(lat= ~meter_lat, lng= ~meter_long)
+
+```
+
+## Weekly revenues
+
+```{r}
+dat$date <- as.POSIXct(dat$date_payment, format = "%Y/%m/%d")
+
+tmp <- strsplit(dat$parkingendtime, " ") # split column into date, clock:time, AM/PM parts
+
+dat$time <- map_chr(tmp, ~.[2]) %>% # get clock:time from each 2nd slot
+    as.POSIXct(format = "%H:%M:%S")
+
+pm_add <- ifelse(grepl("PM", dat$parkingendtime) & !grepl(" 12:", dat$time), #
+                 43200,
+                 0)
+
+dat$time %<>% add(pm_add)
+
+dat %<>% filter(transactiontype != "Collect. Card")
+
+dat$week <- isoweek(dat$date) %>% as.factor()
+dat$day <- wday(dat$date, T)
+dat$hour <- hour(dat$time)
+
+week_rev <- group_by(dat, week, day) %>%
+    summarise(rev = sum(total))
+
+ggplot(week_rev, aes(week, rev, fill = day)) +
+    geom_col()
+```
+
+- First and last weeks are partial
+- No decline over the program
+
+## Weekly patterns
+
+```{r weekly}
+rev_by_day <- group_by(dat, day) %>% 
+    summarise(revenue = sum(total))
+
+ggplot(rev_by_day, aes(day, revenue, fill = day)) +
+    geom_col()
+```
+
+- Sundays are dead
+- Weekend revenue is greater
+
+## Daily patterns
+
+```{r, fig.height = 4}
+group_by(dat, hour, day) %>%
+    summarise(rev = sum(total)) %>%
+    ggplot(aes(hour, rev, colour = day, group = day)) +
+    geom_path(size = 1.5) +
+    scale_color_d3() +
+    scale_x_continuous(breaks = c(8,12,17,20), labels = c("8a", "12p", "5p", "8p"))
+```
+
+- Every day spikes at lunch & dinner
+- A lot more lunch outings on Friday
+- Monday happy hour?
+
+## \$tats
+
+Average meter fee:
+
+```{r}
+mean(dat$total) %>% round(2)
+```
+
+Program revenue: 
+
+```{r}
+sum(dat$total)
+```
+
+Projected yearly revenue:
+```{r}
+week_rev <- group_by(dat, week) %>%
+    summarise(rev = sum(total)) %>%
+    slice(c(-1, -n()))
+
+mean(week_rev$rev) * 52
+```
+
+## Wrap up
+
+- City estimates they will take a loss due to secondary costs (vandalism, consultant)
+
+![](img/wtf.gif)
+
+- Why did they cancel early?
+    - On track for profit
+    - Meters already paid for
+
+## Follow ups
+
+- More data 
+    - How much was the consultant?
+    - What report did the city council see?
+    - Do businesses have data showing lost revenue?
+    
+- More transparent government
+    - Open data for all city decisions
+    - Public support
+    - Less backroom, more accountability
+    
+## Questions
+
+![](img/questions.gif)
